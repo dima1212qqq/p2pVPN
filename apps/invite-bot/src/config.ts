@@ -11,6 +11,7 @@ export interface InviteBotConfig {
     invitesPath: string;
     defaultMaxUses: number;
     maxMaxUses: number;
+    inviteTtlMinutes: number;
     labelPrefix: string;
   };
 }
@@ -27,6 +28,7 @@ export function generateInviteBotConfig(): InviteBotConfig {
       invitesPath: "./config/generated/invite-codes.json",
       defaultMaxUses: 1,
       maxMaxUses: 5,
+      inviteTtlMinutes: 15,
       labelPrefix: "telegram"
     }
   };
@@ -47,6 +49,7 @@ export async function loadInviteBotConfig(path: string): Promise<InviteBotConfig
   parsed.telegram.pollingTimeoutSeconds ??= 25;
   parsed.invites.defaultMaxUses ??= 1;
   parsed.invites.maxMaxUses ??= 5;
+  parsed.invites.inviteTtlMinutes ??= 15;
   parsed.invites.labelPrefix ??= "telegram";
 
   return parsed;

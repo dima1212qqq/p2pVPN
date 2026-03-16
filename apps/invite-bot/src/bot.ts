@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 
 import type { InviteBotConfig } from "./config.js";
 
@@ -13,6 +14,7 @@ interface TelegramUpdate {
     text?: string;
     chat: {
       id: number;
+      type?: string;
     };
     from?: TelegramUser;
   };
@@ -78,8 +80,8 @@ async function handleUpdate(options: StartInviteBotOptions, update: TelegramUpda
   }
 
   const chatId = message.chat.id;
-  if (!options.config.telegram.allowedChatIds.includes(chatId)) {
-    console.warn(`[invite-bot] unauthorized chatId=${chatId} user=${buildInviteLabel("telegram", message.from)}`);
+  if (options.config.telegram.allowedChatIds.length > 0 && !options.config.telegram.allowedChatIds.includes(chatId)) {
+    console.warn(`[invite-bot] unauthorized chatId=${chatId} user=${buildInviteLabel("telegram", chatId, message.from)}`);
     await sendMessage(options.config, chatId, "Access denied.");
     return;
   }
@@ -113,20 +115,24 @@ async function handleUpdate(options: StartInviteBotOptions, update: TelegramUpda
   }
 
   const maxUses = parseMaxUses(text, options.config.invites.defaultMaxUses, options.config.invites.maxMaxUses);
-  const label = buildInviteLabel(options.config.invites.labelPrefix, message.from);
-  const inviteCode = await createInviteCodeViaCli({
-    projectRoot: options.projectRoot,
-    invitesPath: options.config.invites.invitesPath,
-    label,
-    maxUses
-  });
+  const label = buildInviteLabel(options.config.invites.labelPrefix, chatId, message.from);
+  const inviteCode =
+    (await findReusableInviteCode(options.config.invites.invitesPath, label, maxUses)) ??
+    (await createInviteCodeViaCli({
+      projectRoot: options.projectRoot,
+      invitesPath: options.config.invites.invitesPath,
+      label,
+      maxUses,
+      expiresAt: buildInviteExpiryIso(options.config.invites.inviteTtlMinutes)
+    }));
 
   await sendMessage(
     options.config,
     chatId,
     [
       `Invite code: \`${inviteCode}\``,
-      `max uses: ${maxUses}`
+      `max uses: ${maxUses}`,
+      `expires in: ${options.config.invites.inviteTtlMinutes} min`
     ].join("\n")
   );
 }
@@ -147,12 +153,13 @@ function parseMaxUses(text: string, defaultValue: number, maxAllowed: number): n
 
 function buildInviteLabel(
   prefix: string,
+  chatId: number,
   from: TelegramUser | undefined
 ): string {
   const username = from?.username?.trim();
   const displayName = [from?.first_name, from?.last_name].filter(Boolean).join(" ").trim();
   const suffix = username || displayName || "telegram-user";
-  return `${prefix}:${suffix}`;
+  return `${prefix}:${String(chatId)}:${suffix}`;
 }
 
 async function createInviteCodeViaCli(options: {
@@ -160,6 +167,7 @@ async function createInviteCodeViaCli(options: {
   invitesPath: string;
   label: string;
   maxUses: number;
+  expiresAt: string;
 }): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const child = spawn(
@@ -172,7 +180,9 @@ async function createInviteCodeViaCli(options: {
         "--label",
         options.label,
         "--max-uses",
-        String(options.maxUses)
+        String(options.maxUses),
+        "--expires-at",
+        options.expiresAt
       ],
       {
         cwd: options.projectRoot,
@@ -216,6 +226,52 @@ async function createInviteCodeViaCli(options: {
       resolve(line.split("=").at(-1) ?? "");
     });
   });
+}
+
+async function findReusableInviteCode(invitesPath: string, label: string, requestedMaxUses: number): Promise<string | null> {
+  try {
+    const raw = await readFile(invitesPath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      version: 1;
+      invites: Array<{
+        code: string;
+        label?: string;
+        expiresAt?: string;
+        maxUses: number;
+        uses: number;
+        revoked: boolean;
+      }>;
+    };
+
+    const now = Date.now();
+    const existing = parsed.invites.find((invite) => {
+      if (invite.label !== label || invite.revoked) {
+        return false;
+      }
+
+      if (invite.maxUses < requestedMaxUses) {
+        return false;
+      }
+
+      if (invite.uses >= invite.maxUses) {
+        return false;
+      }
+
+      if (invite.expiresAt && Date.parse(invite.expiresAt) <= now) {
+        return false;
+      }
+
+      return true;
+    });
+
+    return existing?.code ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function buildInviteExpiryIso(ttlMinutes: number): string {
+  return new Date(Date.now() + ttlMinutes * 60_000).toISOString();
 }
 
 async function getUpdates(config: InviteBotConfig, offset: number, signal: AbortSignal): Promise<TelegramUpdate[]> {
