@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>p2pvpn desktop</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #08111d;
+        --panel: rgba(14, 27, 43, 0.88);
+        --panel-border: rgba(135, 180, 255, 0.2);
+        --text: #eff6ff;
+        --muted: #95abc6;
+        --accent: #6dd3ff;
+        --danger: #ff8d8d;
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(109, 211, 255, 0.16), transparent 36%),
+          radial-gradient(circle at top right, rgba(255, 141, 141, 0.18), transparent 28%),
+          linear-gradient(145deg, #07101a, #0c1827 50%, #08111d);
+        color: var(--text);
+      }
+
+      .app-shell {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 40px 24px 32px;
+      }
+
+      .hero {
+        display: grid;
+        gap: 12px;
+        margin-bottom: 28px;
+      }
+
+      .eyebrow {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        color: var(--accent);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(36px, 7vw, 60px);
+        line-height: 0.95;
+      }
+
+      .subtitle {
+        max-width: 760px;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.5;
+      }
+
+      .grid {
+        display: grid;
+        gap: 20px;
+        grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+      }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(16px);
+      }
+
+      .controls {
+        padding: 24px;
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        margin-bottom: 20px;
+        border-radius: 999px;
+        background: rgba(109, 211, 255, 0.12);
+        color: var(--accent);
+      }
+
+      .field {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+
+      label {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      .row {
+        display: grid;
+        gap: 8px;
+        grid-template-columns: 1fr auto;
+      }
+
+      input {
+        width: 100%;
+        padding: 12px 14px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 14px;
+        background: rgba(6, 12, 19, 0.62);
+        color: var(--text);
+      }
+
+      button {
+        border: 0;
+        border-radius: 14px;
+        padding: 12px 16px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .button-primary {
+        background: linear-gradient(135deg, var(--accent), #4598ff);
+        color: #07111c;
+      }
+
+      .button-secondary {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+      }
+
+      .button-danger {
+        background: rgba(255, 141, 141, 0.14);
+        color: var(--danger);
+      }
+
+      .button-stack {
+        display: grid;
+        gap: 10px;
+        margin-top: 20px;
+      }
+
+      .event-panel {
+        padding: 24px;
+        min-height: 420px;
+      }
+
+      .event-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: grid;
+        gap: 10px;
+      }
+
+      .event-row {
+        padding: 12px 14px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      @media (max-width: 900px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero">
+        <div class="eyebrow">p2pvpn / holepunch control plane</div>
+        <h1>Desktop access to a foreign exit node.</h1>
+        <div class="subtitle">
+          This shell launches the background desktop agent, connects through hyperdht with WebSocket fallback, and
+          shows session events. TUN and Windows routing are the next layer on top of this handshake.
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="card controls">
+          <div class="status-pill">Status: <strong id="status">Idle</strong></div>
+
+          <div class="field">
+            <label for="manifestPath">Manifest Path</label>
+            <div class="row">
+              <input id="manifestPath" placeholder="C:\path\to\network.manifest.json" />
+              <button class="button-secondary" id="pickManifestButton" type="button">Browse</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="identityPath">Identity Path</label>
+            <div class="row">
+              <input id="identityPath" placeholder="C:\path\to\client-identity.json" />
+              <button class="button-secondary" id="pickIdentityButton" type="button">Browse</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="serverId">Server Id</label>
+            <input id="serverId" placeholder="pl-dev-1" />
+          </div>
+
+          <div class="button-stack">
+            <button class="button-primary" id="connectButton" type="button">Connect</button>
+            <button class="button-danger" id="disconnectButton" type="button">Disconnect</button>
+          </div>
+        </div>
+
+        <div class="card event-panel">
+          <h2>Session Events</h2>
+          <ul class="event-list" id="events"></ul>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>

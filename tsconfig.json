@@ -1,0 +1,20 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/protocol"
+    },
+    {
+      "path": "./packages/config-manifest"
+    },
+    {
+      "path": "./packages/identity"
+    },
+    {
+      "path": "./apps/exit-gateway"
+    },
+    {
+      "path": "./apps/desktop-agent"
+    }
+  ]
+}

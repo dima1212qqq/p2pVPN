@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "declaration": true,
+    "sourceMap": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@p2pvpn/protocol": [
+        "packages/protocol/src/index.ts"
+      ],
+      "@p2pvpn/config-manifest": [
+        "packages/config-manifest/src/index.ts"
+      ],
+      "@p2pvpn/identity": [
+        "packages/identity/src/index.ts"
+      ]
+    }
+  }
+}

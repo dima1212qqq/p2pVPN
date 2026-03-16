@@ -1,0 +1,21 @@
+{
+  "name": "p2pvpn",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "typecheck": "tsc -b tsconfig.json",
+    "dev:server": "npm --workspace @p2pvpn/exit-gateway run dev",
+    "dev:agent": "npm --workspace @p2pvpn/desktop-agent run dev",
+    "dev:ui": "npm --workspace @p2pvpn/desktop-ui run dev"
+  },
+  "devDependencies": {
+    "@types/node": "24.6.0",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3"
+  }
+}

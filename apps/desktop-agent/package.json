@@ -1,0 +1,23 @@
+{
+  "name": "@p2pvpn/desktop-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./dist/agent.js",
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@p2pvpn/config-manifest": "0.1.0",
+    "@p2pvpn/identity": "0.1.0",
+    "@p2pvpn/protocol": "0.1.0",
+    "b4a": "1.8.0",
+    "hyperdht": "6.29.2",
+    "ws": "8.19.0"
+  },
+  "optionalDependencies": {
+    "@xiaobaidadada/node-tuntap2-wintun": "^3.0.2"
+  }
+}
