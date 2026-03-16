@@ -37,6 +37,11 @@ interface RunningServer {
   close: () => Promise<void>;
 }
 
+interface ActiveClientSession {
+  sessionId: string;
+  close: () => void;
+}
+
 export async function startExitGateway(config: ServerConfig, allowlistPath: string): Promise<RunningServer> {
   const authorizedClients = await loadAuthorizedClients(allowlistPath);
   const authorizedClientMap = new Map<string, AuthorizedClient>(
@@ -51,6 +56,7 @@ export async function startExitGateway(config: ServerConfig, allowlistPath: stri
 
   const hyperServer = dht.createServer();
   const activeSessions = new Set<string>();
+  const activeClientSessions = new Map<string, ActiveClientSession>();
   const startedAt = Date.now();
 
   for (const line of packetSessionFactory.describe()) {
@@ -58,7 +64,7 @@ export async function startExitGateway(config: ServerConfig, allowlistPath: stri
   }
 
   hyperServer.on("connection", (stream: Duplex) => {
-    void handleConnection(config, authorizedClientMap, packetSessionFactory, activeSessions, startedAt, {
+    void handleConnection(config, authorizedClientMap, packetSessionFactory, activeSessions, activeClientSessions, startedAt, {
       transport: "hyperdht",
       stream
     });
@@ -103,7 +109,7 @@ export async function startExitGateway(config: ServerConfig, allowlistPath: stri
       const duplex = createWebSocketStream(socket);
       const remoteAddress = request.socket.remoteAddress ?? undefined;
 
-      void handleConnection(config, authorizedClientMap, packetSessionFactory, activeSessions, startedAt, {
+      void handleConnection(config, authorizedClientMap, packetSessionFactory, activeSessions, activeClientSessions, startedAt, {
         transport: "ws",
         stream: duplex,
         remoteAddress
@@ -152,11 +158,63 @@ async function handleConnection(
   authorizedClients: Map<string, AuthorizedClient>,
   packetSessionFactory: PacketSessionFactory,
   activeSessions: Set<string>,
+  activeClientSessions: Map<string, ActiveClientSession>,
   startedAt: number,
   context: TransportContext
 ): Promise<void> {
   const framed = new ProtocolSocket(context.stream);
   let packetSession: PacketSession | null = null;
+  let sessionId: string | null = null;
+  let clientFingerprint: string | null = null;
+  let phase: "handshake" | "active" | "closed" = "handshake";
+  let cleanedUp = false;
+
+  const cleanup = () => {
+    if (cleanedUp) {
+      return;
+    }
+
+    cleanedUp = true;
+    phase = "closed";
+
+    if (sessionId) {
+      activeSessions.delete(sessionId);
+    }
+
+    if (clientFingerprint) {
+      const activeClientSession = activeClientSessions.get(clientFingerprint);
+      if (activeClientSession?.sessionId === sessionId) {
+        activeClientSessions.delete(clientFingerprint);
+      }
+    }
+
+    if (packetSession) {
+      void packetSession.close();
+      packetSession = null;
+    }
+  };
+
+  const terminateConnection = () => {
+    cleanup();
+    framed.close();
+  };
+
+  const handleActiveStreamError = (error: Error) => {
+    if (phase !== "active") {
+      return;
+    }
+
+    if (isIgnorableStreamError(error)) {
+      console.log(`[exit-gateway] connection closed transport=${context.transport}: ${error.message}`);
+    } else {
+      console.error(`[exit-gateway] connection error transport=${context.transport}: ${error.message}`);
+    }
+
+    cleanup();
+  };
+
+  framed.on("error", handleActiveStreamError);
+  framed.once("close", cleanup);
 
   try {
     const hello = await waitForMessage(
@@ -186,7 +244,7 @@ async function handleConnection(
       return;
     }
 
-    const sessionId = randomUUID();
+    sessionId = randomUUID();
     const challenge: AuthChallengeMessage = {
       type: "AUTH_CHALLENGE",
       sessionId,
@@ -225,13 +283,25 @@ async function handleConnection(
       return;
     }
 
-    const assignedTunnelIpv4 = assignTunnelIp(config.sessionTemplate.addressPoolPrefix, authResponse.clientFingerprint);
+    clientFingerprint = authResponse.clientFingerprint;
+    const existingClientSession = activeClientSessions.get(clientFingerprint);
+    if (existingClientSession) {
+      console.log(`[exit-gateway] replacing existing session fingerprint=${clientFingerprint} previousSession=${existingClientSession.sessionId}`);
+      existingClientSession.close();
+    }
+
+    const assignedTunnelIpv4 = assignTunnelIp(config.sessionTemplate.addressPoolPrefix, clientFingerprint);
     packetSession = await packetSessionFactory.createSession({
       mode: negotiatedDataPlaneMode,
       sessionId,
       assignedTunnelIpv4
     });
     activeSessions.add(sessionId);
+    activeClientSessions.set(clientFingerprint, {
+      sessionId,
+      close: terminateConnection
+    });
+    phase = "active";
 
     framed.sendMessage({
       type: "SESSION_CONFIG",
@@ -256,15 +326,8 @@ async function handleConnection(
     });
 
     console.log(
-      `[exit-gateway] connected fingerprint=${authResponse.clientFingerprint} transport=${context.transport} remote=${context.remoteAddress ?? "n/a"}`
+      `[exit-gateway] connected fingerprint=${clientFingerprint} transport=${context.transport} remote=${context.remoteAddress ?? "n/a"}`
     );
-
-    const cleanup = () => {
-      activeSessions.delete(sessionId);
-      if (packetSession) {
-        void packetSession.close();
-      }
-    };
 
     framed.on("message", (message: ProtocolMessage) => {
       if (message.type === "PING") {
@@ -294,9 +357,6 @@ async function handleConnection(
         });
       });
     }
-
-    framed.once("close", cleanup);
-    framed.once("error", cleanup);
   } catch (error) {
     const normalizedError = error instanceof Error ? error : new Error(String(error));
 
@@ -306,7 +366,7 @@ async function handleConnection(
       console.error(`[exit-gateway] connection error transport=${context.transport}: ${normalizedError.message}`);
     }
 
-    framed.close();
+    terminateConnection();
   }
 }
 

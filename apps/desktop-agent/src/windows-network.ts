@@ -239,18 +239,10 @@ export class WindowsNetworkSession {
 
   private async resolveDefaultRoute(): Promise<ResolvedDefaultRoute> {
     const script = [
-      "$route = Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' |",
-      "  Where-Object { $_.NextHop -and $_.NextHop -ne '0.0.0.0' } |",
-      "  Sort-Object @{Expression={ $_.RouteMetric + $_.InterfaceMetric }}, RouteMetric, InterfaceMetric |",
-      "  Select-Object -First 1",
-      "    @{Name='interfaceIndex';Expression={$_.InterfaceIndex}},",
-      "    @{Name='interfaceAlias';Expression={$_.InterfaceAlias}},",
-      "    @{Name='nextHop';Expression={$_.NextHop}},",
-      "    @{Name='routeMetric';Expression={$_.RouteMetric}},",
-      "    @{Name='interfaceMetric';Expression={$_.InterfaceMetric}}",
+      "$route = Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | Where-Object { $_.NextHop -and $_.NextHop -ne '0.0.0.0' } | Sort-Object @{Expression={ $_.RouteMetric + $_.InterfaceMetric }}, RouteMetric, InterfaceMetric | Select-Object -First 1 @{Name='interfaceIndex';Expression={$_.InterfaceIndex}}, @{Name='interfaceAlias';Expression={$_.InterfaceAlias}}, @{Name='nextHop';Expression={$_.NextHop}}, @{Name='routeMetric';Expression={$_.RouteMetric}}, @{Name='interfaceMetric';Expression={$_.InterfaceMetric}}",
       "if (-not $route) { throw 'No active IPv4 default route found' }",
       "$route | ConvertTo-Json -Compress"
-    ].join(" ");
+    ].join("; ");
 
     const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", script]);
     const parsed = JSON.parse(stdout.trim()) as Partial<ResolvedDefaultRoute>;

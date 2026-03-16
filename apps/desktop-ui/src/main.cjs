@@ -1,7 +1,8 @@
 const { spawn } = require("node:child_process");
 const { existsSync } = require("node:fs");
 const path = require("node:path");
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain } = require("electron");
+const projectRoot = path.join(__dirname, "..", "..", "..");
 const agentCliPath = path.join(__dirname, "..", "..", "desktop-agent", "dist", "cli.js");
 
 let mainWindow = null;
@@ -9,8 +10,13 @@ let agentProcess = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 760,
+    width: 260,
+    height: 180,
+    resizable: false,
+    maximizable: false,
+    minimizable: true,
+    fullscreenable: false,
+    autoHideMenuBar: true,
     backgroundColor: "#101927",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -39,21 +45,22 @@ app.on("window-all-closed", () => {
   }
 });
 
-ipcMain.handle("dialog:pick-file", async () => {
-  const result = await dialog.showOpenDialog({
-    properties: ["openFile"]
-  });
-
-  return result.canceled ? null : result.filePaths[0];
-});
-
 ipcMain.handle("agent:connect", async (_event, options) => {
   if (!existsSync(agentCliPath)) {
     throw new Error("Desktop agent is not built. Run `npm run build` first.");
   }
 
-  if (!options?.manifestPath || !options?.identityPath) {
-    throw new Error("Manifest Path and Identity Path are required.");
+  const resolvedOptions = {
+    ...getDefaultAgentOptions(),
+    ...(options ?? {})
+  };
+
+  if (!existsSync(resolvedOptions.manifestPath)) {
+    throw new Error(`Manifest file not found: ${resolvedOptions.manifestPath}`);
+  }
+
+  if (!existsSync(resolvedOptions.identityPath)) {
+    throw new Error(`Identity file not found: ${resolvedOptions.identityPath}`);
   }
 
   stopAgent();
@@ -62,18 +69,30 @@ ipcMain.handle("agent:connect", async (_event, options) => {
     agentCliPath,
     "connect",
     "--manifest",
-    options.manifestPath,
+    resolvedOptions.manifestPath,
     "--identity",
-    options.identityPath,
+    resolvedOptions.identityPath,
     "--json-events"
   ];
 
-  if (options.serverId) {
-    args.push("--server", options.serverId);
+  if (resolvedOptions.serverId) {
+    args.push("--server", resolvedOptions.serverId);
+  }
+
+  if (resolvedOptions.useWintun) {
+    args.push("--wintun");
+
+    if (resolvedOptions.wintunAdapterName) {
+      args.push("--wintun-adapter", resolvedOptions.wintunAdapterName);
+    }
+
+    if (resolvedOptions.applyRoutes) {
+      args.push("--apply-routes");
+    }
   }
 
   agentProcess = spawn("node", args, {
-    cwd: path.join(__dirname, "..", "..", ".."),
+    cwd: projectRoot,
     stdio: ["ignore", "pipe", "pipe"]
   });
 
@@ -103,16 +122,27 @@ ipcMain.handle("agent:connect", async (_event, options) => {
     });
   });
 
-  agentProcess.on("exit", (code) => {
+  agentProcess.on("exit", (code, signal) => {
     mainWindow?.webContents.send("agent:event", {
       event: "agent-exit",
       code,
-      message: `Agent exited with code ${code ?? "null"}`
+      signal: signal ?? null,
+      message: signal ? `Agent exited via signal ${signal}` : `Agent exited with code ${code ?? "null"}`
     });
     agentProcess = null;
   });
 
   return { started: true };
+});
+
+ipcMain.handle("app:defaults", async () => {
+  const defaults = getDefaultAgentOptions();
+
+  return {
+    ...defaults,
+    manifestExists: existsSync(defaults.manifestPath),
+    identityExists: existsSync(defaults.identityPath)
+  };
 });
 
 ipcMain.handle("agent:disconnect", async () => {
@@ -127,4 +157,15 @@ function stopAgent() {
 
   agentProcess.kill();
   agentProcess = null;
+}
+
+function getDefaultAgentOptions() {
+  return {
+    manifestPath: path.join(projectRoot, "config", "generated", "network.hyperdht-only.manifest.json"),
+    identityPath: path.join(projectRoot, "config", "generated", "client-identity.json"),
+    serverId: "pl-dev-1",
+    useWintun: true,
+    applyRoutes: true,
+    wintunAdapterName: "p2pvpn"
+  };
 }

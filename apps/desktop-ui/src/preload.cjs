@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("desktopUi", {
-  pickFile: () => ipcRenderer.invoke("dialog:pick-file"),
+  getDefaults: () => ipcRenderer.invoke("app:defaults"),
   connect: (options) => ipcRenderer.invoke("agent:connect", options),
   disconnect: () => ipcRenderer.invoke("agent:disconnect"),
   onAgentEvent: (listener) => {

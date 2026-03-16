@@ -19,7 +19,7 @@ import {
 
 import type { TransportNetworkContext } from "./network-types.js";
 import { dedupeBypassTargets, resolveHyperDhtBypassTargets, resolveWsBypassTargets } from "./transport-network.js";
-import { createTunnelAdapter, type TunnelAdapter } from "./tunnel.js";
+import { createTunnelAdapter, type TunnelAdapter, type TunnelEvent } from "./tunnel.js";
 
 export interface AgentConnectOptions {
   manifestPath: string;
@@ -371,23 +371,58 @@ async function wireTunnelAdapter(
   sessionConfig: SessionConfigMessage,
   jsonEvents: boolean
 ): Promise<void> {
-  tunnelAdapter.on("event", (event) => {
+  let active = true;
+
+  const onTunnelEvent = (event: TunnelEvent) => {
     emitEvent(jsonEvents, {
       event: `tunnel-${event.type}`,
       packetBytes: event.packetBytes,
       message: event.message
     });
-  });
+  };
 
-  tunnelAdapter.on("packet", (packet) => {
-    framed.sendPacket(packet);
-  });
+  const onTunnelPacket = (packet: Buffer) => {
+    if (!active) {
+      return;
+    }
 
-  framed.on("packet", (packet) => {
+    try {
+      framed.sendPacket(packet);
+    } catch {
+      active = false;
+    }
+  };
+
+  const onFramedPacket = (packet: Buffer) => {
+    if (!active) {
+      return;
+    }
+
     tunnelAdapter.injectInbound(packet);
-  });
+  };
 
-  await tunnelAdapter.start(sessionConfig);
+  const onFramedClosed = () => {
+    active = false;
+  };
+
+  tunnelAdapter.on("event", onTunnelEvent);
+  tunnelAdapter.on("packet", onTunnelPacket);
+  framed.on("packet", onFramedPacket);
+  framed.once("close", onFramedClosed);
+  framed.once("error", onFramedClosed);
+
+  try {
+    await tunnelAdapter.start(sessionConfig);
+  } catch (error) {
+    active = false;
+    tunnelAdapter.off("event", onTunnelEvent);
+    tunnelAdapter.off("packet", onTunnelPacket);
+    framed.off("packet", onFramedPacket);
+    framed.off("close", onFramedClosed);
+    framed.off("error", onFramedClosed);
+    await tunnelAdapter.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 function mapTunnelModeToRequestedDataPlane(mode: "none" | "dev-loopback" | "wintun"): "none" | "dev-loopback" | "tun" {

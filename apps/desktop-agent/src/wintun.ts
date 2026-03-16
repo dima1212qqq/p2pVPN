@@ -80,6 +80,14 @@ export class WintunTunnelAdapter extends EventEmitter<{
       bypassTargets: this.options.networkContext?.bypassTargets ?? []
     });
 
+    if (this.options.applyRoutes) {
+      this.emit("event", {
+        type: "started",
+        message: `Applying Windows route/DNS plan for adapter '${this.options.adapterName}'`
+      });
+      await this.networkSession.apply();
+    }
+
     const onDataResult = this.wintun.on_data((data) => {
       if (this.closed) {
         return;
@@ -97,13 +105,7 @@ export class WintunTunnelAdapter extends EventEmitter<{
       throw new Error(`Wintun.on_data() returned unexpected result ${String(onDataResult)}`);
     }
 
-    if (this.options.applyRoutes) {
-      this.emit("event", {
-        type: "started",
-        message: `Applying Windows route/DNS plan for adapter '${this.options.adapterName}'`
-      });
-      await this.networkSession.apply();
-    } else {
+    if (!this.options.applyRoutes) {
       const planSummary = this.networkSession
         .describePlan()
         .map((item) => `${item.reason}: ${item.command}`)
