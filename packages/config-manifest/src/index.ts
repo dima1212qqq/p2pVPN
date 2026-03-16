@@ -25,6 +25,7 @@ export interface NetworkManifest {
   networkName: string;
   generatedAt: string;
   bootstrap: string[];
+  controlApiBaseUrl?: string;
   servers: NetworkServerEntry[];
 }
 
@@ -68,6 +69,7 @@ export function parseManifest(raw: string): NetworkManifest {
     networkName: expectString(parsed.networkName, "networkName"),
     generatedAt: expectString(parsed.generatedAt, "generatedAt"),
     bootstrap: parsed.bootstrap ? expectStringArray(parsed.bootstrap, "bootstrap") : [...DEFAULT_PUBLIC_BOOTSTRAP],
+    controlApiBaseUrl: typeof parsed.controlApiBaseUrl === "string" ? parsed.controlApiBaseUrl : undefined,
     servers: parsed.servers.map((server, index) => {
       if (!server || typeof server !== "object") {
         throw new Error(`Invalid manifest server entry at index ${index}`);

@@ -15,6 +15,9 @@
     },
     {
       "path": "./apps/desktop-agent"
+    },
+    {
+      "path": "./apps/control-api"
     }
   ]
 }

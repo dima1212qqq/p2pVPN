@@ -4,9 +4,11 @@ import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createRequire } from "node:module";
 
+import { loadManifest } from "@p2pvpn/config-manifest";
 import { createAuthorizedClient, generateClientIdentity, loadClientIdentity, saveClientIdentity } from "@p2pvpn/identity";
 
 import { runAgent } from "./agent.js";
+import { registerDeviceWithInvite } from "./control-api.js";
 import { isRunningAsWindowsAdmin } from "./windows-admin.js";
 
 const require = createRequire(import.meta.url);
@@ -70,6 +72,7 @@ async function main(): Promise<void> {
       const manifestPath = String(parsed.flags.manifest ?? "./config/generated/network.manifest.json");
       const identityPath = String(parsed.flags.identity ?? "./config/generated/client-identity.json");
       const preferredServerId = typeof parsed.flags.server === "string" ? parsed.flags.server : undefined;
+      const controlApiBaseUrl = typeof parsed.flags["control-api"] === "string" ? parsed.flags["control-api"] : undefined;
       const tunnelMode = Boolean(parsed.flags.wintun) ? "wintun" : Boolean(parsed.flags["dev-tunnel"]) ? "dev-loopback" : "none";
       const wintunAdapterName = typeof parsed.flags["wintun-adapter"] === "string" ? parsed.flags["wintun-adapter"] : undefined;
       const wintunDllPath = typeof parsed.flags["wintun-dll"] === "string" ? parsed.flags["wintun-dll"] : undefined;
@@ -83,8 +86,36 @@ async function main(): Promise<void> {
         tunnelMode,
         wintunAdapterName,
         wintunDllPath,
-        applyRoutes: Boolean(parsed.flags["apply-routes"])
+        applyRoutes: Boolean(parsed.flags["apply-routes"]),
+        controlApiBaseUrl
       });
+      return;
+    }
+
+    case "register": {
+      const manifestPath = String(parsed.flags.manifest ?? "./config/generated/network.manifest.json");
+      const identityPath = String(parsed.flags.identity ?? "./config/generated/client-identity.json");
+      const inviteCode = typeof parsed.flags["invite-code"] === "string" ? parsed.flags["invite-code"] : undefined;
+      const controlApiBaseUrl = typeof parsed.flags["control-api"] === "string" ? parsed.flags["control-api"] : undefined;
+
+      if (!inviteCode) {
+        throw new Error("register requires --invite-code");
+      }
+
+      const manifest = await loadManifest(manifestPath);
+      const identity = await loadClientIdentity(identityPath);
+      const resolvedControlApiBaseUrl = controlApiBaseUrl ?? manifest.controlApiBaseUrl;
+      if (!resolvedControlApiBaseUrl) {
+        throw new Error("Manifest does not define controlApiBaseUrl and --control-api was not provided");
+      }
+
+      await registerDeviceWithInvite({
+        controlApiBaseUrl: resolvedControlApiBaseUrl,
+        identity,
+        inviteCode
+      });
+
+      console.log(`[desktop-agent] registered fingerprint=${identity.fingerprint}`);
       return;
     }
 
@@ -104,8 +135,9 @@ function printUsage(): void {
   console.log("Usage:");
   console.log("  init-identity --identity <path> [--name <device name>]");
   console.log("  export-public --identity <path>");
+  console.log("  register --manifest <path> --identity <path> --invite-code <code> [--control-api <url>]");
   console.log("  connect --manifest <path> --identity <path> [--server <id>] [--json-events] [--once] [--dev-tunnel]");
-  console.log("  connect --manifest <path> --identity <path> [--server <id>] [--wintun] [--wintun-adapter <name>] [--wintun-dll <path>] [--apply-routes]");
+  console.log("  connect --manifest <path> --identity <path> [--server <id>] [--control-api <url>] [--wintun] [--wintun-adapter <name>] [--wintun-dll <path>] [--apply-routes]");
   console.log("  doctor-wintun [--wintun-dll <path>]");
 }
 

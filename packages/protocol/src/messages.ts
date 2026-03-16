@@ -1,5 +1,21 @@
 export const PROTOCOL_VERSION = 1;
 
+export interface TunnelTicketPayload {
+  version: 1;
+  ticketId: string;
+  networkName: string;
+  clientFingerprint: string;
+  issuedAt: string;
+  expiresAt: string;
+  allowedServerIds?: string[];
+}
+
+export interface TunnelTicket {
+  version: 1;
+  payload: TunnelTicketPayload;
+  signature: string;
+}
+
 export interface HelloMessage {
   type: "HELLO";
   protocolVersion: number;
@@ -24,6 +40,7 @@ export interface AuthResponseMessage {
   clientFingerprint: string;
   publicKeyPem: string;
   signature: string;
+  tunnelTicket?: TunnelTicket;
 }
 
 export interface SessionConfigMessage {

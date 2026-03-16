@@ -6,9 +6,91 @@
   "main": "src/main.cjs",
   "scripts": {
     "dev": "node ./scripts/dev-ui.cjs",
-    "build": "node -e \"console.log('desktop-ui is currently dev-only; packaging comes after Wintun integration')\""
+    "build": "node -e \"console.log('desktop-ui sources are packaged via electron-builder')\"",
+    "dist:win": "electron-builder --win nsis"
   },
-  "dependencies": {
-    "electron": "41.0.2"
+  "devDependencies": {
+    "electron": "41.0.2",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.p2pvpn.desktop",
+    "productName": "p2pvpn",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../config/generated",
+        "to": "runtime/config/generated",
+        "filter": [
+          "network.hyperdht-only.manifest.json"
+        ]
+      },
+      {
+        "from": "../../apps/desktop-agent/dist",
+        "to": "runtime/apps/desktop-agent/dist"
+      },
+      {
+        "from": "../../node_modules",
+        "to": "runtime/node_modules",
+        "filter": [
+          "**/*",
+          "!**/.bin",
+          "!@p2pvpn{,/**}",
+          "!electron{,/**}",
+          "!electron-builder{,/**}",
+          "!app-builder-lib{,/**}",
+          "!app-builder-bin{,/**}",
+          "!electron-winstaller{,/**}",
+          "!@electron/windows-sign{,/**}",
+          "!@esbuild{,/**}",
+          "!7zip-bin{,/**}",
+          "!dmg-builder{,/**}"
+        ]
+      },
+      {
+        "from": "../../packages/config-manifest",
+        "to": "runtime/node_modules/@p2pvpn/config-manifest",
+        "filter": [
+          "package.json",
+          "dist/**/*"
+        ]
+      },
+      {
+        "from": "../../packages/identity",
+        "to": "runtime/node_modules/@p2pvpn/identity",
+        "filter": [
+          "package.json",
+          "dist/**/*"
+        ]
+      },
+      {
+        "from": "../../packages/protocol",
+        "to": "runtime/node_modules/@p2pvpn/protocol",
+        "filter": [
+          "package.json",
+          "dist/**/*"
+        ]
+      }
+    ],
+    "asarUnpack": [
+      "resources/runtime/node_modules/@xiaobaidadada/node-tuntap2-wintun/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "requestedExecutionLevel": "requireAdministrator"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

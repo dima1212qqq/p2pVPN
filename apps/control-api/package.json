@@ -1,0 +1,16 @@
+{
+  "name": "@p2pvpn/control-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./dist/server.js",
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@p2pvpn/identity": "0.1.0",
+    "@p2pvpn/protocol": "0.1.0"
+  }
+}

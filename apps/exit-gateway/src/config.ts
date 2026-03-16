@@ -31,6 +31,14 @@ export interface ServerConfig {
       keyPath?: string;
     };
   };
+  auth: {
+    mode: "allowlist" | "ticket";
+    ticket: {
+      issuerPublicKeyPem?: string;
+      expectedNetworkName: string;
+      maxClockSkewSeconds: number;
+    };
+  };
   dataPlane: {
     mode: "none" | "dev-loopback" | "tun";
     tun: {
@@ -75,6 +83,13 @@ export function generateServerConfig(serverId = "pl-dev-1"): ServerConfig {
         enabled: false
       }
     },
+    auth: {
+      mode: "allowlist",
+      ticket: {
+        expectedNetworkName: "p2pvpn-dev",
+        maxClockSkewSeconds: 5 * 60
+      }
+    },
     dataPlane: {
       mode: "tun",
       tun: {
@@ -116,6 +131,17 @@ export async function loadServerConfig(path: string): Promise<ServerConfig> {
         mode: "iptables-masquerade"
       }
     }
+  };
+  parsed.auth ??= {
+    mode: "allowlist",
+    ticket: {
+      expectedNetworkName: "p2pvpn-dev",
+      maxClockSkewSeconds: 5 * 60
+    }
+  };
+  parsed.auth.ticket ??= {
+    expectedNetworkName: "p2pvpn-dev",
+    maxClockSkewSeconds: 5 * 60
   };
   parsed.dataPlane.tun ??= {
     applySystemNetwork: true,

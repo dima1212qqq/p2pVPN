@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
 
 import { saveAuthorizedClients } from "@p2pvpn/identity";
 
@@ -45,6 +46,11 @@ async function main(): Promise<void> {
       const configPath = String(parsed.flags.config ?? "./config/generated/server.json");
       const allowlistPath = String(parsed.flags.allowlist ?? "./config/generated/authorized-clients.json");
       const serverId = typeof parsed.flags["server-id"] === "string" ? parsed.flags["server-id"] : "pl-dev-1";
+      const authMode = typeof parsed.flags["auth-mode"] === "string" ? parsed.flags["auth-mode"] : undefined;
+      const ticketIssuerPublicKeyPath =
+        typeof parsed.flags["ticket-issuer-public-key"] === "string" ? parsed.flags["ticket-issuer-public-key"] : undefined;
+      const ticketNetworkName =
+        typeof parsed.flags["ticket-network-name"] === "string" ? parsed.flags["ticket-network-name"] : undefined;
       const requestedDataPlane =
         typeof parsed.flags["data-plane"] === "string" ? parsed.flags["data-plane"] : undefined;
 
@@ -54,6 +60,15 @@ async function main(): Promise<void> {
       const config = generateServerConfig(serverId);
       if (requestedDataPlane === "none" || requestedDataPlane === "dev-loopback" || requestedDataPlane === "tun") {
         config.dataPlane.mode = requestedDataPlane;
+      }
+      if (authMode === "allowlist" || authMode === "ticket") {
+        config.auth.mode = authMode;
+      }
+      if (ticketNetworkName) {
+        config.auth.ticket.expectedNetworkName = ticketNetworkName;
+      }
+      if (ticketIssuerPublicKeyPath) {
+        config.auth.ticket.issuerPublicKeyPem = await readFile(ticketIssuerPublicKeyPath, "utf8");
       }
 
       await saveServerConfig(configPath, config);
@@ -88,7 +103,7 @@ async function main(): Promise<void> {
 
 function printUsage(): void {
   console.log("Usage:");
-  console.log("  init-server --config <path> --allowlist <path> [--server-id <id>] [--data-plane <none|dev-loopback|tun>]");
+  console.log("  init-server --config <path> --allowlist <path> [--server-id <id>] [--data-plane <none|dev-loopback|tun>] [--auth-mode <allowlist|ticket>] [--ticket-issuer-public-key <path>] [--ticket-network-name <name>]");
   console.log("  run --config <path> --allowlist <path>");
 }
 

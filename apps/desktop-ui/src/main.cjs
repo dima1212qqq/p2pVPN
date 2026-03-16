@@ -1,9 +1,10 @@
 const { spawn } = require("node:child_process");
 const { existsSync } = require("node:fs");
+const { mkdir } = require("node:fs/promises");
+const os = require("node:os");
 const path = require("node:path");
 const { app, BrowserWindow, ipcMain } = require("electron");
 const projectRoot = path.join(__dirname, "..", "..", "..");
-const agentCliPath = path.join(__dirname, "..", "..", "desktop-agent", "dist", "cli.js");
 
 let mainWindow = null;
 let agentProcess = null;
@@ -46,12 +47,13 @@ app.on("window-all-closed", () => {
 });
 
 ipcMain.handle("agent:connect", async (_event, options) => {
+  const agentCliPath = getAgentCliPath();
   if (!existsSync(agentCliPath)) {
     throw new Error("Desktop agent is not built. Run `npm run build` first.");
   }
 
   const resolvedOptions = {
-    ...getDefaultAgentOptions(),
+    ...(await getDefaultAgentOptions()),
     ...(options ?? {})
   };
 
@@ -63,6 +65,7 @@ ipcMain.handle("agent:connect", async (_event, options) => {
     throw new Error(`Identity file not found: ${resolvedOptions.identityPath}`);
   }
 
+  const runtimeRoot = getRuntimeRoot();
   stopAgent();
 
   const args = [
@@ -91,9 +94,18 @@ ipcMain.handle("agent:connect", async (_event, options) => {
     }
   }
 
-  agentProcess = spawn("node", args, {
-    cwd: projectRoot,
-    stdio: ["ignore", "pipe", "pipe"]
+  const isPackagedRuntime = app.isPackaged;
+  const childCommand = isPackagedRuntime ? process.execPath : "node";
+  const childEnv = {
+    ...process.env,
+    ...(isPackagedRuntime ? { ELECTRON_RUN_AS_NODE: "1" } : {})
+  };
+
+  agentProcess = spawn(childCommand, args, {
+    cwd: runtimeRoot,
+    env: childEnv,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true
   });
 
   agentProcess.stdout.setEncoding("utf8");
@@ -136,7 +148,7 @@ ipcMain.handle("agent:connect", async (_event, options) => {
 });
 
 ipcMain.handle("app:defaults", async () => {
-  const defaults = getDefaultAgentOptions();
+  const defaults = await getDefaultAgentOptions();
 
   return {
     ...defaults,
@@ -159,13 +171,89 @@ function stopAgent() {
   agentProcess = null;
 }
 
-function getDefaultAgentOptions() {
+async function getDefaultAgentOptions() {
+  const runtimeRoot = getRuntimeRoot();
+  const identityPath = app.isPackaged ? await ensurePackagedIdentity() : path.join(runtimeRoot, "config", "generated", "client-identity.json");
+
   return {
-    manifestPath: path.join(projectRoot, "config", "generated", "network.hyperdht-only.manifest.json"),
-    identityPath: path.join(projectRoot, "config", "generated", "client-identity.json"),
+    manifestPath: path.join(runtimeRoot, "config", "generated", "network.hyperdht-only.manifest.json"),
+    identityPath,
     serverId: "pl-dev-1",
     useWintun: true,
     applyRoutes: true,
     wintunAdapterName: "p2pvpn"
   };
+}
+
+function getRuntimeRoot() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "runtime");
+  }
+
+  return projectRoot;
+}
+
+function getAgentCliPath() {
+  if (app.isPackaged) {
+    return path.join(getRuntimeRoot(), "apps", "desktop-agent", "dist", "cli.js");
+  }
+
+  return path.join(__dirname, "..", "..", "desktop-agent", "dist", "cli.js");
+}
+
+async function ensurePackagedIdentity() {
+  const identityPath = path.join(app.getPath("userData"), "client-identity.json");
+  if (existsSync(identityPath)) {
+    return identityPath;
+  }
+
+  await mkdir(path.dirname(identityPath), { recursive: true });
+  await runAgentUtilityCommand([
+    "init-identity",
+    "--identity",
+    identityPath,
+    "--name",
+    `${app.getName()} ${os.hostname()}`
+  ]);
+
+  return identityPath;
+}
+
+async function runAgentUtilityCommand(commandArgs) {
+  const agentCliPath = getAgentCliPath();
+  const isPackagedRuntime = app.isPackaged;
+  const childCommand = isPackagedRuntime ? process.execPath : "node";
+  const childEnv = {
+    ...process.env,
+    ...(isPackagedRuntime ? { ELECTRON_RUN_AS_NODE: "1" } : {})
+  };
+
+  await new Promise((resolve, reject) => {
+    const child = spawn(childCommand, [agentCliPath, ...commandArgs], {
+      cwd: getRuntimeRoot(),
+      env: childEnv,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true
+    });
+
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(
+        new Error(
+          `Agent utility command failed${signal ? ` via signal ${signal}` : ` with code ${code ?? "null"}`}${stderr ? `: ${stderr.trim()}` : ""}`
+        )
+      );
+    });
+  });
 }

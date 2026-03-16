@@ -14,9 +14,11 @@ import {
   waitForMessageOrThrowRemoteError,
   type AuthChallengeMessage,
   type SessionConfigMessage,
-  type StatsMessage
+  type StatsMessage,
+  type TunnelTicket
 } from "@p2pvpn/protocol";
 
+import { getTunnelTicket } from "./control-api.js";
 import type { TransportNetworkContext } from "./network-types.js";
 import { dedupeBypassTargets, resolveHyperDhtBypassTargets, resolveWsBypassTargets } from "./transport-network.js";
 import { createTunnelAdapter, type TunnelAdapter, type TunnelEvent } from "./tunnel.js";
@@ -31,6 +33,7 @@ export interface AgentConnectOptions {
   wintunAdapterName?: string;
   wintunDllPath?: string;
   applyRoutes?: boolean;
+  controlApiBaseUrl?: string;
 }
 
 interface ConnectedTransport {
@@ -59,6 +62,7 @@ export async function runAgent(options: AgentConnectOptions): Promise<void> {
   const manifest = await loadManifest(options.manifestPath);
   const identity = await loadClientIdentity(options.identityPath);
   const server = selectServer(manifest, options.preferredServerId);
+  const controlApiBaseUrl = options.controlApiBaseUrl ?? manifest.controlApiBaseUrl;
 
   let attempt = 0;
 
@@ -67,6 +71,15 @@ export async function runAgent(options: AgentConnectOptions): Promise<void> {
     let transport: ConnectedTransport | null = null;
 
     try {
+      const tunnelTicket = controlApiBaseUrl
+        ? await getTunnelTicket({
+            controlApiBaseUrl,
+            identity,
+            networkName: manifest.networkName,
+            identityPath: options.identityPath
+          })
+        : undefined;
+
       emitEvent(options.jsonEvents ?? false, {
         event: "connecting",
         attempt,
@@ -75,7 +88,7 @@ export async function runAgent(options: AgentConnectOptions): Promise<void> {
       });
 
       transport = await connectWithFallback(server, resolveBootstrap(manifest, server));
-      const session = await performHandshake(transport, server, identity, options);
+      const session = await performHandshake(transport, server, identity, tunnelTicket, options);
 
       if (options.once) {
         await session.waitForTunnelIdle;
@@ -124,6 +137,7 @@ async function performHandshake(
   transport: ConnectedTransport,
   server: NetworkServerEntry,
   identity: ClientIdentity,
+  tunnelTicket: TunnelTicket | undefined,
   options: AgentConnectOptions
 ): Promise<SessionRuntime> {
   const jsonEvents = options.jsonEvents ?? false;
@@ -150,7 +164,8 @@ async function performHandshake(
     sessionId: challenge.sessionId,
     clientFingerprint: identity.fingerprint,
     publicKeyPem: identity.publicKeyPem,
-    signature: signChallenge(challenge, identity.privateKeyPem)
+    signature: signChallenge(challenge, identity.privateKeyPem),
+    tunnelTicket
   });
 
   const sessionConfig = await waitForMessageOrThrowRemoteError(

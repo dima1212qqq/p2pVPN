@@ -10,7 +10,7 @@ import DHT from "hyperdht";
 import { WebSocketServer, createWebSocketStream } from "ws";
 
 import type { AuthorizedClient } from "@p2pvpn/identity";
-import { loadAuthorizedClients, verifyChallengeResponse } from "@p2pvpn/identity";
+import { loadAuthorizedClients, verifyChallengeResponse, verifyTunnelTicket } from "@p2pvpn/identity";
 import {
   ProtocolSocket,
   PROTOCOL_VERSION,
@@ -43,10 +43,16 @@ interface ActiveClientSession {
 }
 
 export async function startExitGateway(config: ServerConfig, allowlistPath: string): Promise<RunningServer> {
-  const authorizedClients = await loadAuthorizedClients(allowlistPath);
-  const authorizedClientMap = new Map<string, AuthorizedClient>(
-    authorizedClients.clients.map((client: AuthorizedClient) => [client.fingerprint, client])
-  );
+  if (config.auth.mode === "ticket" && !config.auth.ticket.issuerPublicKeyPem) {
+    throw new Error("Server auth.mode=ticket requires auth.ticket.issuerPublicKeyPem");
+  }
+
+  const authorizedClientMap =
+    config.auth.mode === "allowlist"
+      ? new Map<string, AuthorizedClient>(
+          (await loadAuthorizedClients(allowlistPath)).clients.map((client: AuthorizedClient) => [client.fingerprint, client])
+        )
+      : new Map<string, AuthorizedClient>();
   const packetSessionFactory = await createPacketSessionFactory(config);
 
   const dht = new DHT({
@@ -261,26 +267,75 @@ async function handleConnection(
       10_000
     );
 
-    const authorizedClient = authorizedClients.get(authResponse.clientFingerprint);
-
-    if (!authorizedClient) {
+    if (authResponse.clientFingerprint !== hello.clientFingerprint) {
       framed.sendMessage({
         type: "ERROR",
-        code: "CLIENT_NOT_AUTHORIZED",
-        message: "Client fingerprint is not in the allowlist"
+        code: "CLIENT_FINGERPRINT_MISMATCH",
+        message: "HELLO and AUTH_RESPONSE refer to different client fingerprints"
       });
       framed.close();
       return;
     }
 
-    if (!verifyChallengeResponse(challenge, authResponse, authorizedClient.fingerprint)) {
-      framed.sendMessage({
-        type: "ERROR",
-        code: "INVALID_SIGNATURE",
-        message: "Client authentication failed"
+    if (config.auth.mode === "allowlist") {
+      const authorizedClient = authorizedClients.get(authResponse.clientFingerprint);
+
+      if (!authorizedClient) {
+        framed.sendMessage({
+          type: "ERROR",
+          code: "CLIENT_NOT_AUTHORIZED",
+          message: "Client fingerprint is not in the allowlist"
+        });
+        framed.close();
+        return;
+      }
+
+      if (!verifyChallengeResponse(challenge, authResponse, authorizedClient.fingerprint)) {
+        framed.sendMessage({
+          type: "ERROR",
+          code: "INVALID_SIGNATURE",
+          message: "Client authentication failed"
+        });
+        framed.close();
+        return;
+      }
+    } else {
+      if (!authResponse.tunnelTicket) {
+        framed.sendMessage({
+          type: "ERROR",
+          code: "MISSING_TUNNEL_TICKET",
+          message: "Client did not provide a tunnel ticket"
+        });
+        framed.close();
+        return;
+      }
+
+      const ticketVerification = verifyTunnelTicket(authResponse.tunnelTicket, config.auth.ticket.issuerPublicKeyPem!, {
+        expectedClientFingerprint: authResponse.clientFingerprint,
+        expectedNetworkName: config.auth.ticket.expectedNetworkName,
+        expectedServerId: config.serverId,
+        maxClockSkewMs: config.auth.ticket.maxClockSkewSeconds * 1000
       });
-      framed.close();
-      return;
+
+      if (!ticketVerification.valid) {
+        framed.sendMessage({
+          type: "ERROR",
+          code: "INVALID_TUNNEL_TICKET",
+          message: ticketVerification.reason ?? "Tunnel ticket verification failed"
+        });
+        framed.close();
+        return;
+      }
+
+      if (!verifyChallengeResponse(challenge, authResponse, authResponse.clientFingerprint)) {
+        framed.sendMessage({
+          type: "ERROR",
+          code: "INVALID_SIGNATURE",
+          message: "Client challenge signature is invalid"
+        });
+        framed.close();
+        return;
+      }
     }
 
     clientFingerprint = authResponse.clientFingerprint;
