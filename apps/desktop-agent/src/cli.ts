@@ -8,7 +8,7 @@ import { loadManifest } from "@p2pvpn/config-manifest";
 import { createAuthorizedClient, generateClientIdentity, loadClientIdentity, saveClientIdentity } from "@p2pvpn/identity";
 
 import { runAgent } from "./agent.js";
-import { registerDeviceWithInvite } from "./control-api.js";
+import { registerDeviceWithInvite, resolveControlApiBaseUrl } from "./control-api.js";
 import { isRunningAsWindowsAdmin } from "./windows-admin.js";
 
 const require = createRequire(import.meta.url);
@@ -104,7 +104,12 @@ async function main(): Promise<void> {
 
       const manifest = await loadManifest(manifestPath);
       const identity = await loadClientIdentity(identityPath);
-      const resolvedControlApiBaseUrl = controlApiBaseUrl ?? manifest.controlApiBaseUrl;
+      const resolvedControlApiBaseUrl = await resolveControlApiBaseUrl({
+        explicitControlApiBaseUrl: controlApiBaseUrl,
+        manifestControlApiBaseUrl: manifest.controlApiBaseUrl,
+        identityPath,
+        expectedClientFingerprint: identity.fingerprint
+      });
       if (!resolvedControlApiBaseUrl) {
         throw new Error("Manifest does not define controlApiBaseUrl and --control-api was not provided");
       }

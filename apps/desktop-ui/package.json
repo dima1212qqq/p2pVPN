@@ -28,7 +28,8 @@
         "from": "../../config/generated",
         "to": "runtime/config/generated",
         "filter": [
-          "network.hyperdht-only.manifest.json"
+          "network.hyperdht-only.manifest.json",
+          "manifest-signing-public-key.pem"
         ]
       },
       {

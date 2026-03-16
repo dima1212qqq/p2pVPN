@@ -19,6 +19,67 @@ export interface DeviceRegistrationState {
   registeredAt: string;
 }
 
+export async function loadDeviceRegistrationState(identityPath: string): Promise<DeviceRegistrationState | null> {
+  try {
+    const raw = await readFile(getDeviceRegistrationStatePath(identityPath), "utf8");
+    const parsed = JSON.parse(raw) as Partial<DeviceRegistrationState>;
+
+    if (
+      parsed.version !== 1 ||
+      typeof parsed.controlApiBaseUrl !== "string" ||
+      parsed.controlApiBaseUrl.trim() === "" ||
+      typeof parsed.clientFingerprint !== "string" ||
+      parsed.clientFingerprint.trim() === "" ||
+      typeof parsed.registeredAt !== "string" ||
+      parsed.registeredAt.trim() === ""
+    ) {
+      return null;
+    }
+
+    return {
+      version: 1,
+      controlApiBaseUrl: normalizeBaseUrl(parsed.controlApiBaseUrl),
+      clientFingerprint: parsed.clientFingerprint,
+      registeredAt: parsed.registeredAt
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveControlApiBaseUrl(options: {
+  explicitControlApiBaseUrl?: string;
+  manifestControlApiBaseUrl?: string;
+  identityPath?: string;
+  expectedClientFingerprint?: string;
+}): Promise<string | undefined> {
+  if (options.explicitControlApiBaseUrl) {
+    return normalizeBaseUrl(options.explicitControlApiBaseUrl);
+  }
+
+  if (options.manifestControlApiBaseUrl) {
+    return normalizeBaseUrl(options.manifestControlApiBaseUrl);
+  }
+
+  if (!options.identityPath) {
+    return undefined;
+  }
+
+  const registrationState = await loadDeviceRegistrationState(options.identityPath);
+  if (!registrationState) {
+    return undefined;
+  }
+
+  if (
+    options.expectedClientFingerprint &&
+    registrationState.clientFingerprint !== options.expectedClientFingerprint
+  ) {
+    return undefined;
+  }
+
+  return registrationState.controlApiBaseUrl;
+}
+
 export async function registerDeviceWithInvite(options: {
   controlApiBaseUrl: string;
   identity: ClientIdentity;

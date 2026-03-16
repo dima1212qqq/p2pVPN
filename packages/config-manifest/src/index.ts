@@ -1,3 +1,4 @@
+import { createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 export const DEFAULT_PUBLIC_BOOTSTRAP = [
@@ -20,6 +21,12 @@ export interface NetworkServerEntry {
   bootstrap?: string[];
 }
 
+export interface ManifestSignature {
+  algorithm: "ed25519";
+  keyId?: string;
+  value: string;
+}
+
 export interface NetworkManifest {
   version: 1;
   networkName: string;
@@ -27,6 +34,20 @@ export interface NetworkManifest {
   bootstrap: string[];
   controlApiBaseUrl?: string;
   servers: NetworkServerEntry[];
+  signature?: ManifestSignature;
+}
+
+export interface ManifestSelectionOptions {
+  preferredServerId?: string;
+  lastUsedServerId?: string;
+  excludedServerIds?: string[];
+}
+
+export interface ManifestSigningKeyPair {
+  version: 1;
+  createdAt: string;
+  publicKeyPem: string;
+  privateKeyPem: string;
 }
 
 function expectString(value: unknown, fieldName: string): string {
@@ -51,6 +72,41 @@ function expectStringArray(value: unknown, fieldName: string): string[] {
   }
 
   return value;
+}
+
+function expectManifestSignature(value: unknown, fieldName: string): ManifestSignature {
+  if (!value || typeof value !== "object") {
+    throw new Error(`Invalid manifest field: ${fieldName}`);
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.algorithm !== "ed25519") {
+    throw new Error(`Invalid manifest field: ${fieldName}.algorithm`);
+  }
+
+  return {
+    algorithm: "ed25519",
+    keyId: typeof record.keyId === "string" ? record.keyId : undefined,
+    value: expectString(record.value, `${fieldName}.value`)
+  };
+}
+
+function sortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => sortKeys(entry));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  const sortedEntries = Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort((left, right) => left.localeCompare(right))
+    .map((key) => [key, sortKeys(record[key])] as const);
+
+  return Object.fromEntries(sortedEntries);
 }
 
 export function parseManifest(raw: string): NetworkManifest {
@@ -90,35 +146,123 @@ export function parseManifest(raw: string): NetworkManifest {
         mtu: record.mtu === undefined ? 1380 : expectNumber(record.mtu, `servers[${index}].mtu`),
         bootstrap: record.bootstrap ? expectStringArray(record.bootstrap, `servers[${index}].bootstrap`) : undefined
       };
-    })
+    }),
+    signature: parsed.signature ? expectManifestSignature(parsed.signature, "signature") : undefined
   };
 }
 
-export async function loadManifest(path: string): Promise<NetworkManifest> {
+export async function loadManifest(
+  path: string,
+  options: {
+    trustedPublicKeyPem?: string;
+    requireSignature?: boolean;
+  } = {}
+): Promise<NetworkManifest> {
   const raw = await readFile(path, "utf8");
-  return parseManifest(raw);
+  const manifest = parseManifest(raw);
+
+  if (options.trustedPublicKeyPem) {
+    if (!manifest.signature) {
+      throw new Error("Manifest is unsigned but a trusted public key was provided");
+    }
+
+    if (!verifyManifest(manifest, options.trustedPublicKeyPem)) {
+      throw new Error("Manifest signature is invalid");
+    }
+  } else if (options.requireSignature && !manifest.signature) {
+    throw new Error("Manifest signature is required");
+  }
+
+  return manifest;
 }
 
 export function selectServer(manifest: NetworkManifest, preferredServerId?: string): NetworkServerEntry {
-  if (preferredServerId) {
-    const selected = manifest.servers.find((server) => server.id === preferredServerId && server.enabled);
+  return orderServers(manifest, { preferredServerId })[0]!;
+}
+
+export function resolveBootstrap(manifest: NetworkManifest, server: NetworkServerEntry): string[] {
+  return server.bootstrap?.length ? [...server.bootstrap] : [...manifest.bootstrap];
+}
+
+export function orderServers(manifest: NetworkManifest, options: ManifestSelectionOptions = {}): NetworkServerEntry[] {
+  if (options.preferredServerId) {
+    const selected = manifest.servers.find((server) => server.id === options.preferredServerId && server.enabled);
     if (!selected) {
-      throw new Error(`Server '${preferredServerId}' not found or disabled`);
+      throw new Error(`Server '${options.preferredServerId}' not found or disabled`);
     }
 
-    return selected;
+    return [selected];
   }
 
-  const enabledServers = manifest.servers.filter((server) => server.enabled);
+  const excludedServerIds = new Set(options.excludedServerIds ?? []);
+  const enabledServers = manifest.servers.filter((server) => server.enabled && !excludedServerIds.has(server.id));
 
   if (enabledServers.length === 0) {
     throw new Error("Manifest does not contain any enabled servers");
   }
 
-  enabledServers.sort((left, right) => right.weight - left.weight);
-  return enabledServers[0]!;
+  return enabledServers.sort((left, right) => {
+    const leftLastUsed = left.id === options.lastUsedServerId ? 1 : 0;
+    const rightLastUsed = right.id === options.lastUsedServerId ? 1 : 0;
+
+    if (leftLastUsed !== rightLastUsed) {
+      return rightLastUsed - leftLastUsed;
+    }
+
+    if (left.weight !== right.weight) {
+      return right.weight - left.weight;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
 }
 
-export function resolveBootstrap(manifest: NetworkManifest, server: NetworkServerEntry): string[] {
-  return server.bootstrap?.length ? [...server.bootstrap] : [...manifest.bootstrap];
+export function generateManifestSigningKeyPair(): ManifestSigningKeyPair {
+  const keyPair = generateKeyPairSync("ed25519");
+
+  return {
+    version: 1,
+    createdAt: new Date().toISOString(),
+    publicKeyPem: keyPair.publicKey.export({ type: "spki", format: "pem" }).toString(),
+    privateKeyPem: keyPair.privateKey.export({ type: "pkcs8", format: "pem" }).toString()
+  };
+}
+
+export function buildManifestPayload(manifest: NetworkManifest): Buffer {
+  const unsignedManifest: Omit<NetworkManifest, "signature"> = {
+    version: manifest.version,
+    networkName: manifest.networkName,
+    generatedAt: manifest.generatedAt,
+    bootstrap: manifest.bootstrap,
+    controlApiBaseUrl: manifest.controlApiBaseUrl,
+    servers: manifest.servers
+  };
+
+  return Buffer.from(JSON.stringify(sortKeys(unsignedManifest)), "utf8");
+}
+
+export function signManifest(
+  manifest: NetworkManifest,
+  privateKeyPem: string,
+  keyId?: string
+): NetworkManifest {
+  const privateKey = createPrivateKey(privateKeyPem);
+
+  return {
+    ...manifest,
+    signature: {
+      algorithm: "ed25519",
+      keyId,
+      value: sign(null, buildManifestPayload(manifest), privateKey).toString("base64")
+    }
+  };
+}
+
+export function verifyManifest(manifest: NetworkManifest, publicKeyPem: string): boolean {
+  if (!manifest.signature || manifest.signature.algorithm !== "ed25519") {
+    return false;
+  }
+
+  const publicKey = createPublicKey(publicKeyPem);
+  return verify(null, buildManifestPayload(manifest), publicKey, Buffer.from(manifest.signature.value, "base64"));
 }

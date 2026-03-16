@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Duplex } from "node:stream";
 
@@ -5,7 +7,7 @@ import b4a from "b4a";
 import DHT from "hyperdht";
 import WebSocket, { createWebSocketStream } from "ws";
 
-import { loadManifest, resolveBootstrap, selectServer, type NetworkServerEntry } from "@p2pvpn/config-manifest";
+import { loadManifest, orderServers, resolveBootstrap, type NetworkServerEntry } from "@p2pvpn/config-manifest";
 import { createAuthorizedClient, loadClientIdentity, signChallenge, type ClientIdentity } from "@p2pvpn/identity";
 import {
   ProtocolSocket,
@@ -18,8 +20,9 @@ import {
   type TunnelTicket
 } from "@p2pvpn/protocol";
 
-import { getTunnelTicket } from "./control-api.js";
+import { getTunnelTicket, resolveControlApiBaseUrl } from "./control-api.js";
 import type { TransportNetworkContext } from "./network-types.js";
+import { loadServerSelectionState, saveServerSelectionState } from "./server-selection-state.js";
 import { dedupeBypassTargets, resolveHyperDhtBypassTargets, resolveWsBypassTargets } from "./transport-network.js";
 import { createTunnelAdapter, type TunnelAdapter, type TunnelEvent } from "./tunnel.js";
 
@@ -59,74 +62,116 @@ function emitEvent(jsonEvents: boolean, event: Record<string, unknown>): void {
 }
 
 export async function runAgent(options: AgentConnectOptions): Promise<void> {
-  const manifest = await loadManifest(options.manifestPath);
+  const manifestTrustPublicKeyPem = await loadOptionalManifestTrustPublicKey(options.manifestPath);
+  const manifest = await loadManifest(options.manifestPath, {
+    trustedPublicKeyPem: manifestTrustPublicKeyPem
+  });
   const identity = await loadClientIdentity(options.identityPath);
-  const server = selectServer(manifest, options.preferredServerId);
-  const controlApiBaseUrl = options.controlApiBaseUrl ?? manifest.controlApiBaseUrl;
+  const controlApiBaseUrl = await resolveControlApiBaseUrl({
+    explicitControlApiBaseUrl: options.controlApiBaseUrl,
+    manifestControlApiBaseUrl: manifest.controlApiBaseUrl,
+    identityPath: options.identityPath,
+    expectedClientFingerprint: identity.fingerprint
+  });
+  let selectionState = await loadServerSelectionState(options.identityPath, manifest.networkName);
 
   let attempt = 0;
 
   while (true) {
     attempt += 1;
-    let transport: ConnectedTransport | null = null;
+    const excludedServerIds = new Set<string>();
+    const errors: Error[] = [];
 
-    try {
-      const tunnelTicket = controlApiBaseUrl
-        ? await getTunnelTicket({
-            controlApiBaseUrl,
-            identity,
-            networkName: manifest.networkName,
-            identityPath: options.identityPath
-          })
-        : undefined;
-
-      emitEvent(options.jsonEvents ?? false, {
-        event: "connecting",
-        attempt,
-        serverId: server.id,
-        message: `Connecting to ${server.displayName} (attempt ${attempt})`
+    while (excludedServerIds.size < manifest.servers.filter((server) => server.enabled).length) {
+      const orderedServers = orderServers(manifest, {
+        preferredServerId: options.preferredServerId,
+        lastUsedServerId: selectionState?.lastServerId,
+        excludedServerIds: [...excludedServerIds]
       });
 
-      transport = await connectWithFallback(server, resolveBootstrap(manifest, server));
-      const session = await performHandshake(transport, server, identity, tunnelTicket, options);
-
-      if (options.once) {
-        await session.waitForTunnelIdle;
-        await session.close();
-        await transport.close();
-        return;
+      const server = orderedServers[0];
+      if (!server) {
+        break;
       }
 
-      transport.stream.once("close", () => void session.close());
-      transport.stream.once("end", () => void session.close());
-      transport.stream.once("error", () => void session.close());
+      let transport: ConnectedTransport | null = null;
 
-      const activeTransport = transport;
-      await new Promise<void>((resolve, reject) => {
-        activeTransport.stream.once("close", resolve);
-        activeTransport.stream.once("end", resolve);
-        activeTransport.stream.once("error", reject);
-      });
+      try {
+        const tunnelTicket = controlApiBaseUrl
+          ? await getTunnelTicket({
+              controlApiBaseUrl,
+              identity,
+              networkName: manifest.networkName,
+              identityPath: options.identityPath,
+              requestedServerId: server.id
+            })
+          : undefined;
 
-      emitEvent(options.jsonEvents ?? false, {
-        event: "disconnected",
-        serverId: server.id,
-        message: `Disconnected from ${server.displayName}; retrying`
-      });
-    } catch (error) {
-      emitEvent(options.jsonEvents ?? false, {
-        event: "error",
-        serverId: server.id,
-        message: error instanceof Error ? error.message : String(error)
-      });
+        emitEvent(options.jsonEvents ?? false, {
+          event: "connecting",
+          attempt,
+          serverId: server.id,
+          message: `Connecting to ${server.displayName} (attempt ${attempt})`
+        });
 
-      if (transport) {
-        await transport.close().catch(() => undefined);
+        transport = await connectWithFallback(server, resolveBootstrap(manifest, server));
+        const session = await performHandshake(transport, server, identity, tunnelTicket, options);
+        await saveServerSelectionState(options.identityPath, manifest.networkName, server.id);
+        selectionState = {
+          version: 1,
+          networkName: manifest.networkName,
+          lastServerId: server.id,
+          updatedAt: new Date().toISOString()
+        };
+
+        if (options.once) {
+          await session.waitForTunnelIdle;
+          await session.close();
+          await transport.close();
+          return;
+        }
+
+        transport.stream.once("close", () => void session.close());
+        transport.stream.once("end", () => void session.close());
+        transport.stream.once("error", () => void session.close());
+
+        const activeTransport = transport;
+        await new Promise<void>((resolve, reject) => {
+          activeTransport.stream.once("close", resolve);
+          activeTransport.stream.once("end", resolve);
+          activeTransport.stream.once("error", reject);
+        });
+
+        emitEvent(options.jsonEvents ?? false, {
+          event: "disconnected",
+          serverId: server.id,
+          message: `Disconnected from ${server.displayName}; retrying`
+        });
+
+        break;
+      } catch (error) {
+        const normalizedError = error instanceof Error ? error : new Error(String(error));
+        errors.push(normalizedError);
+        excludedServerIds.add(server.id);
+
+        emitEvent(options.jsonEvents ?? false, {
+          event: "error",
+          serverId: server.id,
+          message: normalizedError.message
+        });
+
+        if (transport) {
+          await transport.close().catch(() => undefined);
+        }
+
+        if (options.preferredServerId) {
+          break;
+        }
       }
+    }
 
-      if (options.once) {
-        throw error;
-      }
+    if (options.once) {
+      throw new AggregateError(errors, "All server connection attempts failed");
     }
 
     await delay(Math.min(30_000, 2_000 * attempt));
@@ -254,6 +299,14 @@ async function connectWithFallback(server: NetworkServerEntry, bootstrap: string
   }
 
   return raceConnections(attempts);
+}
+
+async function loadOptionalManifestTrustPublicKey(manifestPath: string): Promise<string | undefined> {
+  try {
+    return await readFile(join(dirname(manifestPath), "manifest-signing-public-key.pem"), "utf8");
+  } catch {
+    return undefined;
+  }
 }
 
 async function raceConnections(attempts: Array<Promise<ConnectedTransport>>): Promise<ConnectedTransport> {

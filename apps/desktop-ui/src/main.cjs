@@ -205,7 +205,6 @@ async function getDefaultAgentOptions() {
   return {
     manifestPath: path.join(runtimeRoot, "config", "generated", "network.hyperdht-only.manifest.json"),
     identityPath,
-    serverId: "pl-dev-1",
     useWintun: true,
     applyRoutes: true,
     wintunAdapterName: "p2pvpn"

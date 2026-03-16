@@ -14,6 +14,7 @@
     "dev:control": "npm --workspace @p2pvpn/control-api run dev",
     "dev:invite-bot": "npm --workspace @p2pvpn/invite-bot run dev",
     "dev:ui": "npm --workspace @p2pvpn/desktop-ui run dev",
+    "manifest": "node ./packages/config-manifest/dist/cli.js",
     "dist:win": "npm run build && npm --workspace @p2pvpn/desktop-ui run dist:win"
   },
   "devDependencies": {

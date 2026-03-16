@@ -17,6 +17,7 @@ This repository contains the first vertical slice of the control plane:
 - shared manifest format describing servers and bootstrap nodes
 - minimal Electron UI that can launch the desktop agent
 - mixed control/data framing with binary `PACKET` frames
+- multi-server ordering with last-used preference and failover
 
 The repository now includes two server-side data-plane paths:
 
@@ -105,6 +106,34 @@ Create `./config/generated/network.manifest.json` based on the generated server 
 }
 ```
 
+If the manifest contains multiple enabled servers and the client is started without `--server`, the desktop agent now:
+
+- prefers the last successfully connected server for this device
+- otherwise picks the highest-weight enabled server
+- fails over to the next enabled server when the preferred one is unavailable
+
+## Optional: sign a manifest
+
+Generate a signing keypair:
+
+```bash
+node ./packages/config-manifest/dist/cli.js init-signing-key --public ./config/generated/manifest-signing-public-key.pem --private ./config/generated/manifest-signing-private-key.pem
+```
+
+Sign a manifest:
+
+```bash
+node ./packages/config-manifest/dist/cli.js sign --manifest ./config/generated/network.hyperdht-only.manifest.json --private ./config/generated/manifest-signing-private-key.pem
+```
+
+Verify a manifest:
+
+```bash
+node ./packages/config-manifest/dist/cli.js verify --manifest ./config/generated/network.hyperdht-only.manifest.json --public ./config/generated/manifest-signing-public-key.pem
+```
+
+If `manifest-signing-public-key.pem` is placed next to the packaged manifest, the desktop client verifies the manifest signature automatically.
+
 ## Run the server
 
 ```bash
@@ -125,6 +154,8 @@ For local Windows development, keep using the existing `config/generated/server.
 ```bash
 npm --workspace @p2pvpn/desktop-agent run dev -- connect --manifest ./config/generated/network.manifest.json --identity ./config/generated/client-identity.json --server pl-dev-1
 ```
+
+Omit `--server` to let the client auto-select and fail over across all enabled manifest servers.
 
 ## Verify packet transport locally
 
