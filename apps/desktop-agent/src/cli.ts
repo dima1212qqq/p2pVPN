@@ -112,7 +112,8 @@ async function main(): Promise<void> {
       await registerDeviceWithInvite({
         controlApiBaseUrl: resolvedControlApiBaseUrl,
         identity,
-        inviteCode
+        inviteCode,
+        identityPath
       });
 
       console.log(`[desktop-agent] registered fingerprint=${identity.fingerprint}`);

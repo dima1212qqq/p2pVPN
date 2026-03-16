@@ -28,9 +28,41 @@
           linear-gradient(145deg, #07101a, #0c1827 50%, #08111d);
       }
 
+      .shell {
+        width: 100%;
+        max-width: 280px;
+        padding: 18px;
+        display: grid;
+        gap: 12px;
+      }
+
+      .invite-shell {
+        display: grid;
+        gap: 10px;
+      }
+
+      .invite-shell[hidden] {
+        display: none;
+      }
+
+      input {
+        width: 100%;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 14px;
+        padding: 12px 14px;
+        font-size: 14px;
+        background: rgba(8, 17, 29, 0.72);
+        color: #eff6ff;
+        outline: none;
+      }
+
+      input::placeholder {
+        color: rgba(239, 246, 255, 0.45);
+      }
+
       button {
         border: 0;
-        min-width: 160px;
+        width: 100%;
         min-height: 64px;
         border-radius: 18px;
         padding: 18px 28px;
@@ -62,10 +94,27 @@
         opacity: 0.7;
         cursor: wait;
       }
+
+      .message {
+        min-height: 18px;
+        text-align: center;
+        font-size: 12px;
+        color: rgba(239, 246, 255, 0.72);
+      }
+
+      .message[hidden] {
+        visibility: hidden;
+      }
     </style>
   </head>
   <body>
-    <button class="button-primary" id="actionButton" type="button">Connect</button>
+    <main class="shell">
+      <div class="invite-shell" id="inviteShell" hidden>
+        <input id="inviteInput" type="text" placeholder="Invite code" autocomplete="off" />
+      </div>
+      <button class="button-primary" id="actionButton" type="button">Connect</button>
+      <div class="message" id="message" hidden></div>
+    </main>
     <script type="module" src="./renderer.js"></script>
   </body>
 </html>

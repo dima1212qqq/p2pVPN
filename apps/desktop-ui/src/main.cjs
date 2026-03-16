@@ -11,8 +11,8 @@ let agentProcess = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 260,
-    height: 180,
+    width: 300,
+    height: 220,
     resizable: false,
     maximizable: false,
     minimizable: true,
@@ -153,13 +153,40 @@ ipcMain.handle("app:defaults", async () => {
   return {
     ...defaults,
     manifestExists: existsSync(defaults.manifestPath),
-    identityExists: existsSync(defaults.identityPath)
+    identityExists: existsSync(defaults.identityPath),
+    registrationExists: existsSync(getRegistrationStatePath(defaults.identityPath))
   };
 });
 
 ipcMain.handle("agent:disconnect", async () => {
   stopAgent();
   return { stopped: true };
+});
+
+ipcMain.handle("agent:register", async (_event, options) => {
+  const resolvedOptions = {
+    ...(await getDefaultAgentOptions()),
+    ...(options ?? {})
+  };
+
+  if (!resolvedOptions.inviteCode || typeof resolvedOptions.inviteCode !== "string") {
+    throw new Error("Invite code is required");
+  }
+
+  stopAgent();
+  await runAgentUtilityCommand([
+    "register",
+    "--manifest",
+    resolvedOptions.manifestPath,
+    "--identity",
+    resolvedOptions.identityPath,
+    "--invite-code",
+    resolvedOptions.inviteCode
+  ]);
+
+  return {
+    registered: existsSync(getRegistrationStatePath(resolvedOptions.identityPath))
+  };
 });
 
 function stopAgent() {
@@ -217,6 +244,10 @@ async function ensurePackagedIdentity() {
   ]);
 
   return identityPath;
+}
+
+function getRegistrationStatePath(identityPath) {
+  return path.join(path.dirname(identityPath), "device-registration.json");
 }
 
 async function runAgentUtilityCommand(commandArgs) {

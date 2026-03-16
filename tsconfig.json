@@ -18,6 +18,9 @@
     },
     {
       "path": "./apps/control-api"
+    },
+    {
+      "path": "./apps/invite-bot"
     }
   ]
 }

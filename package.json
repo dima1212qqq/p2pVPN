@@ -12,6 +12,7 @@
     "dev:server": "npm --workspace @p2pvpn/exit-gateway run dev",
     "dev:agent": "npm --workspace @p2pvpn/desktop-agent run dev",
     "dev:control": "npm --workspace @p2pvpn/control-api run dev",
+    "dev:invite-bot": "npm --workspace @p2pvpn/invite-bot run dev",
     "dev:ui": "npm --workspace @p2pvpn/desktop-ui run dev",
     "dist:win": "npm run build && npm --workspace @p2pvpn/desktop-ui run dist:win"
   },

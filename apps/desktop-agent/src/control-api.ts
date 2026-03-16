@@ -12,10 +12,18 @@ interface RegisterDeviceResponse {
   registered: boolean;
 }
 
+export interface DeviceRegistrationState {
+  version: 1;
+  controlApiBaseUrl: string;
+  clientFingerprint: string;
+  registeredAt: string;
+}
+
 export async function registerDeviceWithInvite(options: {
   controlApiBaseUrl: string;
   identity: ClientIdentity;
   inviteCode: string;
+  identityPath?: string;
 }): Promise<void> {
   const issuedAt = new Date().toISOString();
   const response = await fetchJson<RegisterDeviceResponse>(`${normalizeBaseUrl(options.controlApiBaseUrl)}/v1/devices/register`, {
@@ -40,6 +48,25 @@ export async function registerDeviceWithInvite(options: {
 
   if (!response || response.registered !== true) {
     throw new Error("Control API registration did not return a success response");
+  }
+
+  if (options.identityPath) {
+    const registrationStatePath = getDeviceRegistrationStatePath(options.identityPath);
+    await ensureParentDirectory(registrationStatePath);
+    await writeFile(
+      registrationStatePath,
+      `${JSON.stringify(
+        {
+          version: 1,
+          controlApiBaseUrl: normalizeBaseUrl(options.controlApiBaseUrl),
+          clientFingerprint: options.identity.fingerprint,
+          registeredAt: new Date().toISOString()
+        } satisfies DeviceRegistrationState,
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
   }
 }
 
@@ -86,6 +113,10 @@ export async function getTunnelTicket(options: {
 
 export function getTunnelTicketCachePath(identityPath: string): string {
   return join(dirname(identityPath), "tunnel-ticket.json");
+}
+
+export function getDeviceRegistrationStatePath(identityPath: string): string {
+  return join(dirname(identityPath), "device-registration.json");
 }
 
 async function loadCachedTunnelTicket(path: string): Promise<TunnelTicket | null> {
