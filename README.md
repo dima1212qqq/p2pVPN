@@ -79,6 +79,7 @@ Create `./config/generated/network.manifest.json` based on the generated server 
   "version": 1,
   "networkName": "p2pvpn-dev",
   "generatedAt": "2026-03-16T00:00:00.000Z",
+  "updateUrl": "https://example.com/p2pvpn/network.hyperdht-only.manifest.json",
   "bootstrap": [
     "88.99.3.86@node1.hyperdht.org:49737",
     "142.93.90.113@node2.hyperdht.org:49737",
@@ -133,6 +134,7 @@ node ./packages/config-manifest/dist/cli.js verify --manifest ./config/generated
 ```
 
 If `manifest-signing-public-key.pem` is placed next to the packaged manifest, the desktop client verifies the manifest signature automatically.
+When the packaged desktop client starts, it keeps a local manifest copy in `userData`, downloads `updateUrl`, verifies the signature, and replaces the local copy only if the downloaded manifest is newer and valid.
 
 ## Run the server
 

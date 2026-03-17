@@ -4,6 +4,7 @@ const { mkdir } = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { app, BrowserWindow, ipcMain } = require("electron");
+const { ensureManagedManifest } = require("./manifest-runtime.cjs");
 const projectRoot = path.join(__dirname, "..", "..", "..");
 
 let mainWindow = null;
@@ -201,9 +202,16 @@ function stopAgent() {
 async function getDefaultAgentOptions() {
   const runtimeRoot = getRuntimeRoot();
   const identityPath = app.isPackaged ? await ensurePackagedIdentity() : path.join(runtimeRoot, "config", "generated", "client-identity.json");
+  const manifestPath = app.isPackaged
+    ? (await ensureManagedManifest({
+        runtimeRoot,
+        userDataPath: app.getPath("userData"),
+        packaged: true
+      })).manifestPath
+    : path.join(runtimeRoot, "config", "generated", "network.hyperdht-only.manifest.json");
 
   return {
-    manifestPath: path.join(runtimeRoot, "config", "generated", "network.hyperdht-only.manifest.json"),
+    manifestPath,
     identityPath,
     useWintun: true,
     applyRoutes: true,

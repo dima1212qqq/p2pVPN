@@ -31,6 +31,7 @@ export interface NetworkManifest {
   version: 1;
   networkName: string;
   generatedAt: string;
+  updateUrl?: string;
   bootstrap: string[];
   controlApiBaseUrl?: string;
   servers: NetworkServerEntry[];
@@ -124,6 +125,7 @@ export function parseManifest(raw: string): NetworkManifest {
     version: 1,
     networkName: expectString(parsed.networkName, "networkName"),
     generatedAt: expectString(parsed.generatedAt, "generatedAt"),
+    updateUrl: typeof parsed.updateUrl === "string" ? expectString(parsed.updateUrl, "updateUrl") : undefined,
     bootstrap: parsed.bootstrap ? expectStringArray(parsed.bootstrap, "bootstrap") : [...DEFAULT_PUBLIC_BOOTSTRAP],
     controlApiBaseUrl: typeof parsed.controlApiBaseUrl === "string" ? parsed.controlApiBaseUrl : undefined,
     servers: parsed.servers.map((server, index) => {
@@ -233,6 +235,7 @@ export function buildManifestPayload(manifest: NetworkManifest): Buffer {
     version: manifest.version,
     networkName: manifest.networkName,
     generatedAt: manifest.generatedAt,
+    updateUrl: manifest.updateUrl,
     bootstrap: manifest.bootstrap,
     controlApiBaseUrl: manifest.controlApiBaseUrl,
     servers: manifest.servers
