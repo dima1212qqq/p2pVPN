@@ -13,6 +13,15 @@ function setMessage(text = "") {
 }
 
 function renderActionButton() {
+  if (viewState === "loading") {
+    elements.inviteShell.hidden = true;
+    elements.actionButton.textContent = "Loading...";
+    elements.actionButton.className = "button-primary";
+    elements.actionButton.disabled = true;
+    elements.inviteInput.disabled = true;
+    return;
+  }
+
   const inviteMode = viewState === "needs-registration" || viewState === "registering";
   elements.inviteShell.hidden = !inviteMode;
 
@@ -69,7 +78,11 @@ function applyDefaults(config) {
 }
 
 function reportUiError(error) {
-  viewState = defaults?.registrationExists ? "idle" : "needs-registration";
+  if (!defaults) {
+    viewState = "disabled";
+  } else {
+    viewState = defaults.registrationExists ? "idle" : "needs-registration";
+  }
   renderActionButton();
   setMessage(error instanceof Error ? error.message : String(error));
 }
@@ -89,7 +102,7 @@ if (window.desktopUi) {
 elements.actionButton.addEventListener("click", async () => {
   try {
     if (!defaults) {
-      throw new Error("Application defaults are not loaded yet.");
+      throw new Error("Application is still loading");
     }
 
     if (viewState === "needs-registration") {

@@ -80,6 +80,7 @@ Create `./config/generated/network.manifest.json` based on the generated server 
   "networkName": "p2pvpn-dev",
   "generatedAt": "2026-03-16T00:00:00.000Z",
   "updateUrl": "https://example.com/p2pvpn/network.hyperdht-only.manifest.json",
+  "trustKeyUrl": "https://example.com/p2pvpn/manifest-signing-public-key.pem",
   "bootstrap": [
     "88.99.3.86@node1.hyperdht.org:49737",
     "142.93.90.113@node2.hyperdht.org:49737",
@@ -133,8 +134,15 @@ Verify a manifest:
 node ./packages/config-manifest/dist/cli.js verify --manifest ./config/generated/network.hyperdht-only.manifest.json --public ./config/generated/manifest-signing-public-key.pem
 ```
 
-If `manifest-signing-public-key.pem` is placed next to the packaged manifest, the desktop client verifies the manifest signature automatically.
-When the packaged desktop client starts, it keeps a local manifest copy in `userData`, downloads `updateUrl`, verifies the signature, and replaces the local copy only if the downloaded manifest is newer and valid.
+The packaged desktop client keeps a local manifest copy in `userData`, downloads `updateUrl`, verifies the signature, and replaces the local copy only if the downloaded manifest is newer and valid.
+
+Trust bootstrap for packaged clients now works like this:
+
+- if a pinned `manifest-signing-public-key.pem` already exists in `userData`, the client trusts only that key
+- otherwise it tries the bundled `manifest-signing-public-key.pem`
+- if the bundled key does not verify the downloaded manifest, the client fetches `trustKeyUrl` (or `manifest-signing-public-key.pem` next to `updateUrl`) and pins that key locally on first success
+
+This makes the manifest itself publicly downloadable for any new client build while still pinning the signing key after the first successful bootstrap.
 
 ## Run the server
 

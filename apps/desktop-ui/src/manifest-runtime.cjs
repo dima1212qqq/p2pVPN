@@ -48,35 +48,38 @@ async function refreshManagedManifest(options) {
 
   await mkdir(options.userDataPath, { recursive: true });
 
-  if (existsSync(bundledTrustKeyPath)) {
-    await copyFile(bundledTrustKeyPath, managedTrustKeyPath);
-  }
-
   if (!existsSync(managedManifestPath)) {
     await copyFile(bundledManifestPath, managedManifestPath);
-  } else {
-    await syncBundledFallbackManifest({
-      bundledManifestPath,
-      managedManifestPath,
-      manifestModule
-    });
   }
 
-  const trustPublicKeyPem = existsSync(managedTrustKeyPath) ? await readFile(managedTrustKeyPath, "utf8") : undefined;
-  const currentManifest = await manifestModule.loadManifest(managedManifestPath, {
-    trustedPublicKeyPem: trustPublicKeyPem
-  });
+  const bundledManifest = await loadManifestUnchecked(manifestModule, bundledManifestPath);
+  const currentManifest = await loadManifestUnchecked(manifestModule, managedManifestPath);
+  const localTrustKeyPem = existsSync(managedTrustKeyPath) ? await readFile(managedTrustKeyPath, "utf8") : undefined;
+  const bundledTrustKeyPem = existsSync(bundledTrustKeyPath) ? await readFile(bundledTrustKeyPath, "utf8") : undefined;
+  const currentVerification = verifyManifestWithCandidates(
+    manifestModule,
+    currentManifest,
+    getPinnedTrustCandidates(localTrustKeyPem, bundledTrustKeyPem)
+  );
+  const updateUrl = currentManifest.updateUrl ?? bundledManifest?.updateUrl;
+  const trustKeyUrl =
+    currentManifest.trustKeyUrl ??
+    bundledManifest?.trustKeyUrl ??
+    deriveTrustKeyUrl(updateUrl);
 
-  if (!currentManifest.updateUrl) {
-    return;
-  }
+  if (!updateUrl) {
+    if (!currentVerification.valid) {
+      throw new Error("Manifest signature is invalid and no update URL is configured");
+    }
 
-  if (!trustPublicKeyPem) {
+    if (!localTrustKeyPem && currentVerification.trustKeyPem) {
+      await writeFile(managedTrustKeyPath, currentVerification.trustKeyPem, "utf8");
+    }
     return;
   }
 
   try {
-    const response = await fetch(currentManifest.updateUrl, {
+    const response = await fetch(updateUrl, {
       method: "GET",
       headers: {
         accept: "application/json"
@@ -89,20 +92,29 @@ async function refreshManagedManifest(options) {
 
     const rawManifest = await response.text();
     const remoteManifest = manifestModule.parseManifest(rawManifest);
-
-    if (!remoteManifest.signature) {
-      throw new Error("Remote manifest is unsigned");
-    }
-
-    if (!manifestModule.verifyManifest(remoteManifest, trustPublicKeyPem)) {
-      throw new Error("Remote manifest signature is invalid");
-    }
+    const remoteTrust = await resolveRemoteTrustKey({
+      localTrustKeyPem,
+      bundledTrustKeyPem,
+      trustKeyUrl,
+      remoteManifest,
+      manifestModule
+    });
 
     if (remoteManifest.networkName !== currentManifest.networkName) {
       throw new Error("Remote manifest belongs to a different network");
     }
 
-    if (!isRemoteManifestPreferred(currentManifest, remoteManifest)) {
+    if (!remoteTrust.valid) {
+      throw new Error(remoteTrust.errorMessage ?? "Remote manifest signature is invalid");
+    }
+
+    if (remoteTrust.persistedTrustKeyPem) {
+      await writeFile(managedTrustKeyPath, remoteTrust.persistedTrustKeyPem, "utf8");
+    } else if (!localTrustKeyPem && currentVerification.trustKeyPem) {
+      await writeFile(managedTrustKeyPath, currentVerification.trustKeyPem, "utf8");
+    }
+
+    if (currentVerification.valid && !isRemoteManifestPreferred(currentManifest, remoteManifest)) {
       return;
     }
 
@@ -111,16 +123,15 @@ async function refreshManagedManifest(options) {
     await rm(managedManifestPath, { force: true });
     await rename(tempPath, managedManifestPath);
   } catch (error) {
+    if (!currentVerification.valid) {
+      throw error;
+    }
+
+    if (!localTrustKeyPem && currentVerification.trustKeyPem) {
+      await writeFile(managedTrustKeyPath, currentVerification.trustKeyPem, "utf8");
+    }
+
     console.warn(`[desktop-ui] manifest update skipped: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-async function syncBundledFallbackManifest(options) {
-  const bundledManifest = await options.manifestModule.loadManifest(options.bundledManifestPath);
-  const managedManifest = await options.manifestModule.loadManifest(options.managedManifestPath);
-
-  if (isRemoteManifestPreferred(managedManifest, bundledManifest)) {
-    await copyFile(options.bundledManifestPath, options.managedManifestPath);
   }
 }
 
@@ -143,6 +154,107 @@ async function loadManifestModule(runtimeRoot, packaged) {
   const modulePath = existsSync(preferredModulePath) ? preferredModulePath : fallbackModulePath;
 
   return import(pathToFileURL(modulePath).href);
+}
+
+async function loadManifestUnchecked(manifestModule, manifestPath) {
+  const raw = await readFile(manifestPath, "utf8");
+  return manifestModule.parseManifest(raw);
+}
+
+function verifyManifestWithCandidates(manifestModule, manifest, trustKeyCandidates) {
+  for (const trustKeyPem of trustKeyCandidates) {
+    if (!trustKeyPem) {
+      continue;
+    }
+
+    if (manifest.signature && manifestModule.verifyManifest(manifest, trustKeyPem)) {
+      return {
+        valid: true,
+        trustKeyPem
+      };
+    }
+  }
+
+  return {
+    valid: false,
+    trustKeyPem: undefined
+  };
+}
+
+function getPinnedTrustCandidates(localTrustKeyPem, bundledTrustKeyPem) {
+  if (localTrustKeyPem) {
+    return [localTrustKeyPem];
+  }
+
+  return bundledTrustKeyPem ? [bundledTrustKeyPem] : [];
+}
+
+function deriveTrustKeyUrl(updateUrl) {
+  if (!updateUrl) {
+    return undefined;
+  }
+
+  try {
+    return new URL(TRUST_KEY_FILE_NAME, updateUrl).toString();
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveRemoteTrustKey(options) {
+  const pinnedVerification = verifyManifestWithCandidates(
+    options.manifestModule,
+    options.remoteManifest,
+    getPinnedTrustCandidates(options.localTrustKeyPem, options.bundledTrustKeyPem)
+  );
+
+  if (pinnedVerification.valid) {
+    return {
+      valid: true,
+      persistedTrustKeyPem: options.localTrustKeyPem ? undefined : pinnedVerification.trustKeyPem
+    };
+  }
+
+  if (options.localTrustKeyPem) {
+    return {
+      valid: false,
+      persistedTrustKeyPem: undefined,
+      errorMessage: "Pinned manifest trust key does not match the remote manifest signature"
+    };
+  }
+
+  if (!options.trustKeyUrl) {
+    return {
+      valid: false,
+      persistedTrustKeyPem: undefined,
+      errorMessage: "Remote manifest signature is invalid and no trust key URL is configured"
+    };
+  }
+
+  const response = await fetch(options.trustKeyUrl, {
+    method: "GET",
+    headers: {
+      accept: "text/plain"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Trust key request failed with HTTP ${response.status}`);
+  }
+
+  const fetchedTrustKeyPem = await response.text();
+  if (!options.manifestModule.verifyManifest(options.remoteManifest, fetchedTrustKeyPem)) {
+    return {
+      valid: false,
+      persistedTrustKeyPem: undefined,
+      errorMessage: "Fetched trust key does not verify the remote manifest"
+    };
+  }
+
+  return {
+    valid: true,
+    persistedTrustKeyPem: fetchedTrustKeyPem.trimEnd().concat("\n")
+  };
 }
 
 module.exports = {

@@ -32,6 +32,7 @@ export interface NetworkManifest {
   networkName: string;
   generatedAt: string;
   updateUrl?: string;
+  trustKeyUrl?: string;
   bootstrap: string[];
   controlApiBaseUrl?: string;
   servers: NetworkServerEntry[];
@@ -126,6 +127,7 @@ export function parseManifest(raw: string): NetworkManifest {
     networkName: expectString(parsed.networkName, "networkName"),
     generatedAt: expectString(parsed.generatedAt, "generatedAt"),
     updateUrl: typeof parsed.updateUrl === "string" ? expectString(parsed.updateUrl, "updateUrl") : undefined,
+    trustKeyUrl: typeof parsed.trustKeyUrl === "string" ? expectString(parsed.trustKeyUrl, "trustKeyUrl") : undefined,
     bootstrap: parsed.bootstrap ? expectStringArray(parsed.bootstrap, "bootstrap") : [...DEFAULT_PUBLIC_BOOTSTRAP],
     controlApiBaseUrl: typeof parsed.controlApiBaseUrl === "string" ? parsed.controlApiBaseUrl : undefined,
     servers: parsed.servers.map((server, index) => {
@@ -236,6 +238,7 @@ export function buildManifestPayload(manifest: NetworkManifest): Buffer {
     networkName: manifest.networkName,
     generatedAt: manifest.generatedAt,
     updateUrl: manifest.updateUrl,
+    trustKeyUrl: manifest.trustKeyUrl,
     bootstrap: manifest.bootstrap,
     controlApiBaseUrl: manifest.controlApiBaseUrl,
     servers: manifest.servers
